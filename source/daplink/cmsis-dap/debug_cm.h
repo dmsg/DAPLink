@@ -22,19 +22,14 @@
 #ifndef DEBUG_CM_H
 #define DEBUG_CM_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include "DAP.h"
 
-// Debug Port Register Addresses
-#define DP_IDCODE      0x00        // IDCODE Register (Read only)
-#define DP_ABORT       0x00        // Abort Register (Write only)
-#define DP_CTRL_STAT   0x04        // Control & Status
-#define DP_WCR         0x04        // Wire Control Register (SW Only)
-#define DP_DLCR        0x04        // Data Link Control Register (Renamed WCR)
-#define DP_SELECT      0x08        // Select Register (JTAG R/W & SW W)
-#define DP_RESEND      0x08        // Resend (SW Read Only)
-#define DP_RDBUFF      0x0C        // Read Buffer (Read Only)
+// SWD register access
+#define SWD_REG_AP        (1)
+#define SWD_REG_DP        (0)
+#define SWD_REG_R         (1<<1)
+#define SWD_REG_W         (0<<1)
+#define SWD_REG_ADR(a)    (a & 0x0c)
 
 // Abort Register definitions
 #define DAPABORT       0x00000001  // DAP Abort
@@ -99,6 +94,7 @@ extern "C" {
 #define CSW_MSTRCORE   0x00000000  // Master Type: Core
 #define CSW_MSTRDBG    0x20000000  // Master Type: Debug
 #define CSW_RESERVED   0x01000000  // Reserved Value
+#define CSW_SPROT      0x40000000  // SProt
 
 // Core Debug Register Address Offsets
 #define DBG_OFS        0x0DF0      // Debug Register Offset inside NVIC
@@ -167,8 +163,7 @@ extern "C" {
 #define VCATCH         0x00000008  // Vector Catch Flag
 #define EXTERNAL       0x00000010  // External Debug Request
 
-#ifdef __cplusplus
-}
-#endif
+// Data Watchpoint and Trace unit
+#define DWT_PCSR       0xe000101c  // DWT PC Sampling Register
 
 #endif

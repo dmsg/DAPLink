@@ -3,7 +3,7 @@
  * @brief   Implementation of flash_intf.h
  *
  * DAPLink Interface Firmware
- * Copyright (c) 2009-2016, ARM Limited, All Rights Reserved
+ * Copyright (c) 2009-2019, ARM Limited, All Rights Reserved
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -19,7 +19,7 @@
  * limitations under the License.
  */
 
-#include "string.h"
+#include <string.h>
 
 #include "daplink.h"
 #include "flash_intf.h"
@@ -29,7 +29,6 @@
 #include "compiler.h"
 #include "crc.h"
 #include "info.h"
-#include "macro.h"
 
 // Application start must be aligned to page write
 COMPILER_ASSERT(DAPLINK_ROM_APP_START % DAPLINK_MIN_WRITE_SIZE == 0);
@@ -63,6 +62,7 @@ static bool sector_erase_allowed(uint32_t addr);
 static error_t intercept_page_write(uint32_t addr, const uint8_t *buf, uint32_t size);
 static error_t intercept_sector_erase(uint32_t addr);
 static error_t critical_erase_and_program(uint32_t addr, const uint8_t *data, uint32_t size);
+static uint8_t target_flash_busy(void);
 
 static const flash_intf_t flash_intf = {
     init,
@@ -72,6 +72,7 @@ static const flash_intf_t flash_intf = {
     erase_chip,
     program_page_min_size,
     erase_sector_size,
+    target_flash_busy,
 };
 
 const flash_intf_t *const flash_intf_iap_protected = &flash_intf;
@@ -496,4 +497,8 @@ static error_t critical_erase_and_program(uint32_t addr, const uint8_t *data, ui
     }
 
     return ERROR_SUCCESS;
+}
+
+static uint8_t target_flash_busy(void){
+    return (state == STATE_OPEN);
 }

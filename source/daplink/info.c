@@ -3,7 +3,7 @@
  * @brief   Implementation of info.h
  *
  * DAPLink Interface Firmware
- * Copyright (c) 2009-2016, ARM Limited, All Rights Reserved
+ * Copyright (c) 2009-2020 Arm Limited, All Rights Reserved
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -19,17 +19,21 @@
  * limitations under the License.
  */
 
-#include "string.h"
-
-#include "main.h"
+#include <string.h>
 #include "info.h"
 #include "target_config.h"
-#include "board.h"
 #include "read_uid.h"
-#include "virtual_fs.h"
 #include "util.h"
 #include "crc.h"
 #include "daplink.h"
+#include "settings.h"
+#include "target_board.h"
+#include "flash_hal.h"
+
+static char hex_to_ascii(uint8_t x)
+{
+    return ('0' + (x>9 ? x+0x27 : x));
+}
 
 // Constant variables
 static const daplink_info_t *const info_bl = (daplink_info_t *)(DAPLINK_ROM_BL_START + DAPLINK_INFO_OFFSET);
@@ -42,13 +46,13 @@ static uint32_t hic_id = DAPLINK_HIC_ID;
 
 static uint32_t crc_bootloader;
 static uint32_t crc_interface;
-static uint32_t crc_config_admin;
 static uint32_t crc_config_user;
 
 // Strings
 static char string_unique_id[48 + 1];
 static char string_mac[12 + 1];
 static char string_board_id[4 + 1];
+static char string_family_id[4 + 1];
 static char string_host_id[32 + 1];
 static char string_target_id[32 + 1];
 static char string_hic_id[8 + 1];
@@ -95,9 +99,11 @@ const char *info_get_unique_id_string_descriptor(void)
     return usb_desc_unique_id;
 }
 
-static void setup_basics()
+//prevent the compiler to optimize board and family id
+static void setup_basics(void)
 {
     uint8_t i = 0, idx = 0;
+    uint16_t family_id = get_family_id();
     memset(string_board_id, 0, sizeof(string_board_id));
     memset(string_host_id, 0, sizeof(string_host_id));
     memset(string_target_id, 0, sizeof(string_target_id));
@@ -124,9 +130,27 @@ static void setup_basics()
     idx += util_write_hex32(string_hic_id + idx, hic_id);
     string_hic_id[idx++] = 0;
     // Board ID
-    extern char *board_id;  //TODO - remove
-    memcpy(string_board_id, board_id, 4);
+    memcpy(string_board_id, get_board_id(), 4);
     string_board_id[4] = 0;
+    idx = 0;
+    //Family ID
+    string_family_id[idx++] = hex_to_ascii(((family_id >> 12) & 0xF));
+    string_family_id[idx++] = hex_to_ascii(((family_id >> 8) & 0xF));
+#if !(defined(DAPLINK_BL)) &&  defined(DRAG_N_DROP_SUPPORT)   //need to change the unique id when the msd is disabled
+    #if defined(MSC_ENDPOINT)
+    if (config_ram_get_disable_msd() == 1 || flash_algo_valid()==0){
+        string_family_id[idx++] = hex_to_ascii((((family_id >> 4) | 0x08) & 0xF));
+    } else {
+        string_family_id[idx++] = hex_to_ascii(((family_id >> 4) & 0xF));
+    }
+    #else //no msd support always have the most significant bit set for family id 2nd byte
+        string_family_id[idx++] = hex_to_ascii((((family_id >> 4) | 0x08) & 0xF));
+    #endif
+#else
+    string_family_id[idx++] = hex_to_ascii(((family_id >> 4) & 0xF));
+#endif
+    string_family_id[idx++] = hex_to_ascii(((family_id) & 0xF));
+    string_family_id[idx++] = 0;
     // Version
     idx = 0;
     string_version[idx++] = '0' + (DAPLINK_VERSION / 1000) % 10;
@@ -140,7 +164,7 @@ static void setup_unique_id()
 {
     memset(string_unique_id, 0, sizeof(string_unique_id));
     strcat(string_unique_id, string_board_id);
-    strcat(string_unique_id, "0000");           // Reserved - was version number
+    strcat(string_unique_id, string_family_id);
     strcat(string_unique_id, string_host_id);
     strcat(string_unique_id, string_hic_id);
 }
@@ -185,40 +209,46 @@ void info_set_uuid_target(uint32_t *uuid_data)
 
 bool info_get_bootloader_present(void)
 {
-    bool present = true;
-
     if (0 == DAPLINK_ROM_BL_SIZE) {
-        present = false;
+        return false;
+    }
+
+    // Check whether we can read the bootloader info.
+    if (!flash_is_readable((uint32_t)info_bl, sizeof(daplink_info_t))) {
+        return false;
     }
 
     if (DAPLINK_BUILD_KEY_BL != info_bl->build_key) {
-        present = false;
+        return false;
     }
 
     if (DAPLINK_HIC_ID != info_bl->hic_id) {
-        present = false;
+        return false;
     }
 
-    return present;
+    return true;
 }
 
 bool info_get_interface_present(void)
 {
-    bool present = true;
-
     if (0 == DAPLINK_ROM_IF_SIZE) {
-        present = false;
+        return false;
+    }
+
+    // Check whether we can read the interface info.
+    if (!flash_is_readable((uint32_t)info_if, sizeof(daplink_info_t))) {
+        return false;
     }
 
     if (DAPLINK_BUILD_KEY_IF != info_if->build_key) {
-        present = false;
+        return false;
     }
 
     if (DAPLINK_HIC_ID != info_if->hic_id) {
-        present = false;
+        return false;
     }
 
-    return present;
+    return true;
 }
 
 bool info_get_config_admin_present(void)
@@ -243,11 +273,6 @@ uint32_t info_get_crc_interface()
     return crc_interface;
 }
 
-uint32_t info_get_crc_config_admin()
-{
-    return crc_config_admin;
-}
-
 uint32_t info_get_crc_config_user()
 {
     return crc_config_user;
@@ -257,23 +282,21 @@ void info_crc_compute()
 {
     crc_bootloader = 0;
     crc_interface = 0;
-    crc_config_admin = 0;
     crc_config_user = 0;
 
     // Compute the CRCs of regions that exist
-    if (DAPLINK_ROM_BL_SIZE > 0) {
+    if ((DAPLINK_ROM_BL_SIZE > 0)
+            && flash_is_readable(DAPLINK_ROM_BL_START, DAPLINK_ROM_BL_SIZE - 4)) {
         crc_bootloader = crc32((void *)DAPLINK_ROM_BL_START, DAPLINK_ROM_BL_SIZE - 4);
     }
 
-    if (DAPLINK_ROM_IF_SIZE > 0) {
+    if ((DAPLINK_ROM_IF_SIZE > 0)
+            && flash_is_readable(DAPLINK_ROM_IF_START, DAPLINK_ROM_IF_SIZE - 4)) {
         crc_interface = crc32((void *)DAPLINK_ROM_IF_START, DAPLINK_ROM_IF_SIZE - 4);
     }
 
-    if (DAPLINK_ROM_CONFIG_ADMIN_SIZE > 0) {
-        crc_config_admin = crc32((void *)DAPLINK_ROM_CONFIG_ADMIN_START, DAPLINK_ROM_CONFIG_ADMIN_SIZE);
-    }
-
-    if (DAPLINK_ROM_CONFIG_USER_SIZE > 0) {
+    if ((DAPLINK_ROM_CONFIG_USER_SIZE > 0)
+            && flash_is_readable(DAPLINK_ROM_CONFIG_USER_START, DAPLINK_ROM_CONFIG_USER_SIZE)) {
         crc_config_user = crc32((void *)DAPLINK_ROM_CONFIG_USER_START, DAPLINK_ROM_CONFIG_USER_SIZE);
     }
 }
@@ -298,3 +321,4 @@ uint32_t info_get_interface_version(void)
 
     return info_if->version;
 }
+

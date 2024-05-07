@@ -1,9 +1,9 @@
 /**
  * @file    sscity.c
- * @brief   board ID for the Switch Science ty51822r3 board
+ * @brief   board ID for the Switch Science mbed TY51822r3 board
  *
  * DAPLink Interface Firmware
- * Copyright (c) 2009-2016, ARM Limited, All Rights Reserved
+ * Copyright (c) 2009-2019, ARM Limited, All Rights Reserved
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -18,8 +18,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "virtual_fs.h"
 
-const char *board_id = "1019";
+#include "target_family.h"
+#include "target_board.h"
 
-const vfs_filename_t daplink_drive_name =     "MBED       ";
+extern target_cfg_t target_device_nrf51822_32;
+
+const board_info_t g_board_info = {
+    .info_version = kBoardInfoVersion,
+    .board_id = "1019",
+    .family_id = kNordic_Nrf51_FamilyID,
+    .daplink_drive_name = 		"MBED       ",
+    .target_cfg = &target_device_nrf51822_32,
+    .board_vendor = "Switch Science",
+    .board_name = "mbed TY51822r3",
+};

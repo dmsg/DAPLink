@@ -19,7 +19,6 @@
  * limitations under the License.
  */
 
-#include "RTL.h"
 #include "rl_usb.h"
 #include "sam3u.h"
 #include "util.h"
@@ -177,13 +176,13 @@ void USBD_Connect(BOOL con)
     }
 }
 
-
 /*
  *  USB Device Reset Function
  *   Called automatically on USB Device Reset
  *    Return Value:    None
  */
-
+extern U8 USBD_ConfigDescriptor_HS[];
+extern U8 USBD_ConfigDescriptor[];
 void USBD_Reset(void)
 {
     uint32_t ep, EPMask;
@@ -225,6 +224,32 @@ void USBD_Reset(void)
                                            UDPHS_EPTCTLENB_STALL_SNT           |
                                            UDPHS_EPTCTLENB_NYET_DIS            |
                                            UDPHS_EPTCTLENB_EPT_ENABL;
+                                           
+    
+#if (USBD_HS_ENABLE == 1)
+    U8 * config_desc = USBD_ConfigDescriptor_HS;
+#else
+    U8 * config_desc = USBD_ConfigDescriptor;
+#endif
+
+    while (((USB_ENDPOINT_DESCRIPTOR *)config_desc)->bLength > 0) {
+        if (((USB_ENDPOINT_DESCRIPTOR *)config_desc)->bDescriptorType == USB_ENDPOINT_DESCRIPTOR_TYPE) {
+            uint32_t num, type, dir, size, banks, interval;
+            USB_ENDPOINT_DESCRIPTOR *pEPD =  (USB_ENDPOINT_DESCRIPTOR *)config_desc;
+            num      = pEPD->bEndpointAddress & 0x0F;
+            type     = pEPD->bmAttributes & USB_ENDPOINT_TYPE_MASK;
+            dir      = pEPD->bEndpointAddress >> 7;
+            interval = pEPD->bInterval;
+            size     = USBD_CalcSizeEP(pEPD->wMaxPacketSize);
+            banks    = 1;
+            UDPHS->UDPHS_EPT[num].UDPHS_EPTCFG    = (interval << 8) |
+                                                    (banks    << 6) |
+                                                    (type     << 4) |
+                                                    (dir      << 3) |
+                                                    (size     << 0) ;
+        }
+        config_desc += ((USB_ENDPOINT_DESCRIPTOR *)config_desc)->bLength;
+    }
 }
 
 
@@ -325,21 +350,22 @@ void USBD_Configure(BOOL cfg)
 
 void USBD_ConfigEP(USB_ENDPOINT_DESCRIPTOR *pEPD)
 {
-    uint32_t num, type, dir, size, banks, interval;
+    uint32_t num;//, type, dir, size, banks, interval;
     num      = pEPD->bEndpointAddress & 0x0F;
-    type     = pEPD->bmAttributes & USB_ENDPOINT_TYPE_MASK;
+    /*type     = pEPD->bmAttributes & USB_ENDPOINT_TYPE_MASK;
     dir      = pEPD->bEndpointAddress >> 7;
     interval = pEPD->bInterval;
     size     = USBD_CalcSizeEP(pEPD->wMaxPacketSize);
     banks    = 1;
-
+    */
     /* Check if MaxPacketSize fits for EndPoint                                 */
     if (pEPD->wMaxPacketSize <= USBD_GetSizeEP(num)) {
-        UDPHS->UDPHS_EPT[num].UDPHS_EPTCFG    = (interval << 8) |
+        /*UDPHS->UDPHS_EPT[num].UDPHS_EPTCFG    = (interval << 8) |
                                                 (banks    << 6) |
                                                 (type     << 4) |
                                                 (dir      << 3) |
-                                                (size     << 0) ;
+                                                //(size     << 0) ;
+                                                 6;*/
         UDPHS->UDPHS_EPT[num].UDPHS_EPTCTLENB =
             (0x1 <<  9) |  /* Received OUT Data Interrupt Enable                    */
             (0x1 << 10) |  /* Transmitted IN Data Complete Interrupt Enable         */

@@ -19,9 +19,19 @@
  * limitations under the License.
  */
 
-#include "string.h"
+#include <string.h>
 
 #include "intelhex.h"
+#include "cmsis_compiler.h"
+
+#if defined(__CC_ARM)
+#pragma push
+#pragma O3
+#pragma Otime
+#elif defined(__GNUC__) && !defined(__ARMCC_VERSION)
+#pragma GCC push_options
+#pragma GCC optimize("O3")
+#endif
 
 typedef enum hex_record_t hex_record_t;
 enum hex_record_t {
@@ -30,13 +40,15 @@ enum hex_record_t {
     EXT_SEG_ADDR_RECORD = 2,
     START_SEG_ADDR_RECORD = 3,
     EXT_LINEAR_ADDR_RECORD = 4,
-    START_LINEAR_ADDR_RECORD = 5
+    START_LINEAR_ADDR_RECORD = 5,
+    CUSTOM_METADATA_RECORD = 0x0A,
+    CUSTOM_DATA_RECORD = 0x0D,
 };
 
 typedef union hex_line_t hex_line_t;
-union __attribute__((packed)) hex_line_t {
+__PACKED_UNION hex_line_t {
     uint8_t buf[0x25];
-    struct __attribute__((packed)) {
+    __PACKED_STRUCT {
         uint8_t  byte_count;
         uint16_t address;
         uint8_t  record_type;
@@ -79,19 +91,23 @@ static uint8_t validate_checksum(hex_line_t *record)
     return (result == 0);
 }
 
-static hex_line_t line = {0}, shadow_line = {0};
+static hex_line_t line = {0};
 static uint32_t next_address_to_write = 0;
-static uint8_t low_nibble = 0, idx = 0, record_processed = 0, load_unaligned_record = 0;
+static uint8_t low_nibble = 0, idx = 0, record_processed = 0, load_unaligned_record = 0, skip_until_aligned = 0;
+static uint16_t binary_version = 0;
+uint16_t board_id_hex __WEAK;
+uint16_t board_id_hex_default __WEAK;
 
 void reset_hex_parser(void)
 {
     memset(line.buf, 0, sizeof(hex_line_t));
-    memset(shadow_line.buf, 0, sizeof(hex_line_t));
     next_address_to_write = 0;
     low_nibble = 0;
     idx = 0;
     record_processed = 0;
     load_unaligned_record = 0;
+    binary_version = 0;
+    skip_until_aligned = 0;
 }
 
 hexfile_parse_status_t parse_hex_blob(const uint8_t *hex_blob, const uint32_t hex_blob_size, uint32_t *hex_parse_cnt, uint8_t *bin_buf, const uint32_t bin_buf_size, uint32_t *bin_buf_address, uint32_t *bin_buf_cnt)
@@ -100,6 +116,16 @@ hexfile_parse_status_t parse_hex_blob(const uint8_t *hex_blob, const uint32_t he
     hexfile_parse_status_t status = HEX_PARSE_UNINIT;
     // reset the amount of data that is being return'd
     *bin_buf_cnt = (uint32_t)0;
+    if (skip_until_aligned) {
+        if (hex_blob[0] == ':') {
+            // This is block is aligned we can stop skipping
+            skip_until_aligned = 0;
+        } else {
+            // This is block is not aligned we can skip it
+            status = HEX_PARSE_OK;
+            goto hex_parser_exit;
+        }
+    }
 
     // we had an exit state where the address was unaligned to the previous record and data count.
     //  Need to pop the last record into the buffer before decoding anthing else since it was
@@ -121,75 +147,7 @@ hexfile_parse_status_t parse_hex_blob(const uint8_t *hex_blob, const uint32_t he
             // junk we dont care about could also just run the validate_checksum on &line
             case '\r':
             case '\n':
-                if (0 == validate_checksum(&line)) {
-                    status = HEX_PARSE_CKSUM_FAIL;
-                    goto hex_parser_exit;
-                } else {
-                    if (!record_processed) {
-                        record_processed = 1;
-                        // address byteswap...
-                        line.address = swap16(line.address);
-
-                        switch (line.record_type) {
-                            case DATA_RECORD:
-                                // keeping a record of the last hex record
-                                memcpy(shadow_line.buf, line.buf, sizeof(hex_line_t));
-
-                                // verify this is a continous block of memory or need to exit and dump
-                                if (((next_address_to_write & 0xffff0000) | line.address) != next_address_to_write) {
-                                    load_unaligned_record = 1;
-                                    status = HEX_PARSE_UNALIGNED;
-                                    goto hex_parser_exit;
-                                }
-
-                                // move from line buffer back to input buffer
-                                memcpy(bin_buf, line.data, line.byte_count);
-                                bin_buf += line.byte_count;
-                                *bin_buf_cnt = (uint32_t)(*bin_buf_cnt) + line.byte_count;
-                                // Save next address to write
-                                next_address_to_write = ((next_address_to_write & 0xffff0000) | line.address) + line.byte_count;
-                                break;
-
-                            case EOF_RECORD:
-                                // pad rest of the buffer with 0xff
-                                //memset(bin_buf, 0xff, (bin_buf_size - (uint32_t)(*bin_buf_cnt)));
-                                //*bin_buf_cnt = bin_buf_size;
-                                status = HEX_PARSE_EOF;
-                                goto hex_parser_exit;
-
-                            case EXT_SEG_ADDR_RECORD:
-                                // Could have had data in the buffer so must exit and try to program
-                                //  before updating bin_buf_address with next_address_to_write
-                                memset(bin_buf, 0xff, (bin_buf_size - (uint32_t)(*bin_buf_cnt)));
-                                // figure the start address for the buffer before returning
-                                *bin_buf_address = next_address_to_write - (uint32_t)(*bin_buf_cnt);
-                                *hex_parse_cnt = (uint32_t)(hex_blob_size - (end - hex_blob));
-                                // update the address msb's
-                                next_address_to_write = (next_address_to_write & 0x00000000) | ((line.data[0] << 12) | (line.data[1] << 4));
-                                // Need to exit and program if buffer has been filled
-                                status = HEX_PARSE_UNALIGNED;
-                                return status;
-
-                            case EXT_LINEAR_ADDR_RECORD:
-                                // Could have had data in the buffer so must exit and try to program
-                                //  before updating bin_buf_address with next_address_to_write
-                                //  Good catch Gaute!!
-                                memset(bin_buf, 0xff, (bin_buf_size - (uint32_t)(*bin_buf_cnt)));
-                                // figure the start address for the buffer before returning
-                                *bin_buf_address = next_address_to_write - (uint32_t)(*bin_buf_cnt);
-                                *hex_parse_cnt = (uint32_t)(hex_blob_size - (end - hex_blob));
-                                // update the address msb's
-                                next_address_to_write = (next_address_to_write & 0x00000000) | ((line.data[0] << 24) | (line.data[1] << 16));
-                                // Need to exit and program if buffer has been filled
-                                status = HEX_PARSE_UNALIGNED;
-                                return status;
-
-                            default:
-                                break;
-                        }
-                    }
-                }
-
+                //ignore new lines
                 break;
 
             // found start of a new record. reset state variables
@@ -204,7 +162,91 @@ hexfile_parse_status_t parse_hex_blob(const uint8_t *hex_blob, const uint32_t he
             default:
                 if (low_nibble) {
                     line.buf[idx] |= ctoh((uint8_t)(*hex_blob)) & 0xf;
-                    idx++;
+                    if (++idx >= (line.byte_count + 5)) { //all data in
+                        if (0 == validate_checksum(&line)) {
+                            status = HEX_PARSE_CKSUM_FAIL;
+                            goto hex_parser_exit;
+                        } else {
+                            if (!record_processed) {
+                                record_processed = 1;
+                                // address byteswap...
+                                line.address = swap16(line.address);
+
+                                switch (line.record_type) {
+                                    case CUSTOM_METADATA_RECORD:
+                                        binary_version = (uint16_t) line.data[0] << 8 | line.data[1];
+                                        break;
+
+                                    case DATA_RECORD:
+                                    case CUSTOM_DATA_RECORD:
+                                        if (binary_version == 0 || binary_version == board_id_hex_default || binary_version == board_id_hex) {
+                                            // Only save data from the correct binary
+                                            // verify this is a continous block of memory or need to exit and dump
+                                            if (((next_address_to_write & 0xffff0000) | line.address) != next_address_to_write) {
+                                                load_unaligned_record = 1;
+                                                status = HEX_PARSE_UNALIGNED;
+                                                // Function will be executed again and will start by finishing to process this record by
+                                                // adding the this line into bin_buf, so the 1st loop iteration should be the next blob byte
+                                                hex_blob++;
+                                                goto hex_parser_exit;
+                                            } else {
+                                                // This should be superfluous but it is necessary for GCC
+                                                load_unaligned_record = 0;
+                                            }
+
+                                            // move from line buffer back to input buffer
+                                            memcpy(bin_buf, line.data, line.byte_count);
+                                            bin_buf += line.byte_count;
+                                            *bin_buf_cnt = (uint32_t)(*bin_buf_cnt) + line.byte_count;
+                                            // Save next address to write
+                                            next_address_to_write = ((next_address_to_write & 0xffff0000) | line.address) + line.byte_count;
+                                        } else {
+                                            // This is Universal Hex block that does not match our version.
+                                            // We can skip this block and all blocks until we find a
+                                            // block aligned on a record boundary.
+                                            skip_until_aligned = 1;
+                                            status = HEX_PARSE_OK;
+                                            goto hex_parser_exit;
+                                        }
+                                        break;
+
+                                    case EOF_RECORD:
+                                        status = HEX_PARSE_EOF;
+                                        goto hex_parser_exit;
+
+                                    case EXT_SEG_ADDR_RECORD:
+                                        // Could have had data in the buffer so must exit and try to program
+                                        //  before updating bin_buf_address with next_address_to_write
+                                        memset(bin_buf, 0xff, (bin_buf_size - (uint32_t)(*bin_buf_cnt)));
+                                        // figure the start address for the buffer before returning
+                                        *bin_buf_address = next_address_to_write - (uint32_t)(*bin_buf_cnt);
+                                        *hex_parse_cnt = (uint32_t)(hex_blob_size - (end - hex_blob));
+                                        // update the address msb's
+                                        next_address_to_write = (next_address_to_write & 0x00000000) | ((line.data[0] << 12) | (line.data[1] << 4));
+                                        // Need to exit and program if buffer has been filled
+                                        status = HEX_PARSE_UNALIGNED;
+                                        return status;
+
+                                    case EXT_LINEAR_ADDR_RECORD:
+                                        // Could have had data in the buffer so must exit and try to program
+                                        //  before updating bin_buf_address with next_address_to_write
+                                        //  Good catch Gaute!!
+                                        memset(bin_buf, 0xff, (bin_buf_size - (uint32_t)(*bin_buf_cnt)));
+                                        // figure the start address for the buffer before returning
+                                        *bin_buf_address = next_address_to_write - (uint32_t)(*bin_buf_cnt);
+                                        *hex_parse_cnt = (uint32_t)(hex_blob_size - (end - hex_blob));
+                                        // update the address msb's
+                                        next_address_to_write = (next_address_to_write & 0x00000000) | ((line.data[0] << 24) | (line.data[1] << 16));
+                                        // Need to exit and program if buffer has been filled
+                                        status = HEX_PARSE_UNALIGNED;
+                                        return status;
+
+                                    default:
+                                        break;
+                                }
+                            }
+                        }
+                    }
                 } else {
                     if (idx < sizeof(hex_line_t)) {
                         line.buf[idx] = ctoh((uint8_t)(*hex_blob)) << 4;
@@ -228,3 +270,9 @@ hex_parser_exit:
     *hex_parse_cnt = (uint32_t)(hex_blob_size - (end - hex_blob));
     return status;
 }
+
+#if defined(__CC_ARM)
+#pragma pop
+#elif defined(__GNUC__) && !defined(__ARMCC_VERSION)
+#pragma GCC pop_options
+#endif

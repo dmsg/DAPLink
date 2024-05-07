@@ -22,8 +22,8 @@
 #ifndef INFO_H
 #define INFO_H
 
-#include "stdbool.h"
-#include "stdint.h"
+#include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -37,7 +37,7 @@ void info_crc_compute(void);
 // Get the 48 digit unique ID as a null terminated string.
 // This is the string used as the USB serial number.
 // This string is made up of the following:
-// <board ID><4 reserved bytes><host ID><hic ID>
+// <board ID><family ID><host ID><hic ID>
 const char *info_get_unique_id(void);
 
 // Get the 4 digit board ID as a null terminated string
@@ -78,7 +78,6 @@ bool info_get_config_user_present(void);
 // the given region is present.
 uint32_t info_get_crc_bootloader(void);
 uint32_t info_get_crc_interface(void);
-uint32_t info_get_crc_config_admin(void);
 uint32_t info_get_crc_config_user(void);
 
 // Get version info as an integer

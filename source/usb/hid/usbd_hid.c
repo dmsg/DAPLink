@@ -19,9 +19,8 @@
  * limitations under the License.
  */
 
-#include "string.h"
+#include <string.h>
 
-#include "RTL.h"
 #include "rl_usb.h"
 #include "usb_for_lib.h"
 
@@ -44,25 +43,25 @@ U16 DataFeatReceLen;
 
 
 /* Dummy Weak Functions that need to be provided by user */
-__weak void usbd_hid_init(void)
+__WEAK void usbd_hid_init(void)
 {
 
 }
-__weak int usbd_hid_get_report(U8 rtype, U8 rid, U8 *buf, U8 req)
+__WEAK int usbd_hid_get_report(U8 rtype, U8 rid, U8 *buf, U8 req)
 {
     return (0);
 };
-__weak void usbd_hid_set_report(U8  rtype, U8 rid, U8 *buf, int len, U8 req)
+__WEAK void usbd_hid_set_report(U8  rtype, U8 rid, U8 *buf, int len, U8 req)
 {
 
 }
-__weak U8 usbd_hid_get_protocol(void)
+__WEAK U8 usbd_hid_get_protocol(void)
 {
     return (0);
 };
-__weak void usbd_hid_set_protocol(U8  protocol)
+__WEAK void usbd_hid_set_protocol(U8  protocol)
 {
-    
+
 };
 
 
@@ -274,7 +273,10 @@ void USBD_HID_EP_INTIN_Event(U32 event)
             bytes_to_send = usbd_hid_maxpacketsize[USBD_HighSpeed];
         }
 
-        USBD_WriteEP(usbd_hid_ep_intin | 0x80, ptrDataOut, bytes_to_send);
+        if (usbd_hid_ep_intin != 0) { //control ep does the sending to host
+            USBD_WriteEP(usbd_hid_ep_intin | 0x80, ptrDataOut, bytes_to_send);
+        }
+
         ptrDataOut     += bytes_to_send;
         DataOutSentLen += bytes_to_send;
 
@@ -461,7 +463,7 @@ void USBD_HID_SOF_Event(void)
  *    Return Value:    None
  */
 
-__task void USBD_RTX_HID_EP_INTIN_Event(void)
+void USBD_RTX_HID_EP_INTIN_Event(void)
 {
     for (;;) {
         usbd_os_evt_wait_or(0xFFFF, 0xFFFF);
@@ -479,7 +481,7 @@ __task void USBD_RTX_HID_EP_INTIN_Event(void)
  *    Return Value:    None
  */
 
-__task void USBD_RTX_HID_EP_INTOUT_Event(void)
+void USBD_RTX_HID_EP_INTOUT_Event(void)
 {
     for (;;) {
         usbd_os_evt_wait_or(0xFFFF, 0xFFFF);
@@ -497,7 +499,7 @@ __task void USBD_RTX_HID_EP_INTOUT_Event(void)
  *    Return Value:    None
  */
 
-__task void USBD_RTX_HID_EP_INT_Event(void)
+void USBD_RTX_HID_EP_INT_Event(void)
 {
     for (;;) {
         usbd_os_evt_wait_or(0xFFFF, 0xFFFF);

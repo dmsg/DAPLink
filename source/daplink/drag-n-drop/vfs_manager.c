@@ -3,7 +3,7 @@
  * @brief   Implementation of vfs_manager.h
  *
  * DAPLink Interface Firmware
- * Copyright (c) 2009-2016, ARM Limited, All Rights Reserved
+ * Copyright (c) 2009-2020 Arm Limited, All Rights Reserved
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -19,23 +19,20 @@
  * limitations under the License.
  */
 
-#include "stdbool.h"
-#include "ctype.h"
+#include <ctype.h>
 
-#include "main.h"
-#include "RTL.h"
+#include "daplink.h"
+#include DAPLINK_MAIN_HEADER
+#include "cmsis_os2.h"
 #include "rl_usb.h"
 #include "virtual_fs.h"
 #include "vfs_manager.h"
 #include "daplink_debug.h"
-#include "validation.h"
 #include "info.h"
 #include "settings.h"
-#include "daplink.h"
 #include "util.h"
 #include "version_git.h"
 #include "IO_Config.h"
-#include "target_reset.h"
 #include "file_stream.h"
 #include "error.h"
 
@@ -76,7 +73,8 @@ typedef enum {
 
 typedef struct {
     vfs_file_t file_to_program;     // A pointer to the directory entry of the file being programmed
-    vfs_sector_t start_sector;      // Start sector of the file being programmed
+    vfs_sector_t start_sector;      // Start sector of the file being programmed by stream
+    vfs_sector_t file_start_sector; // Start sector of the file being programmed by vfs
     vfs_sector_t file_next_sector;  // Expected next sector of the file
     vfs_sector_t last_ooo_sector;   // Last out of order sector within the file
     uint32_t size_processed;        // The number of bytes processed by the stream
@@ -103,6 +101,7 @@ static const file_transfer_state_t default_transfer_state = {
     VFS_INVALID_SECTOR,
     VFS_INVALID_SECTOR,
     VFS_INVALID_SECTOR,
+    VFS_INVALID_SECTOR,
     0,
     0,
     0,
@@ -116,6 +115,17 @@ static const file_transfer_state_t default_transfer_state = {
     STREAM_TYPE_NONE,
 };
 
+//Compile option not to include MSC at all, these will be dummy variables
+#ifndef MSC_ENDPOINT
+BOOL USBD_MSC_MediaReady = __FALSE;
+BOOL USBD_MSC_ReadOnly = __FALSE;
+U32 USBD_MSC_MemorySize;
+U32 USBD_MSC_BlockSize;
+U32 USBD_MSC_BlockGroup;
+U32 USBD_MSC_BlockCount;
+U8 *USBD_MSC_BlockBuf;
+#endif
+
 static uint32_t usb_buffer[VFS_SECTOR_SIZE / sizeof(uint32_t)];
 static error_t fail_reason = ERROR_SUCCESS;
 static file_transfer_state_t file_transfer_state;
@@ -126,8 +136,8 @@ static vfs_mngr_state_t vfs_state;
 static vfs_mngr_state_t vfs_state_next;
 static uint32_t time_usb_idle;
 
-static OS_MUT sync_mutex;
-static OS_TID sync_thread = 0;
+static osMutexId_t sync_mutex;
+static osThreadId_t sync_thread = 0;
 
 // Synchronization functions
 static void sync_init(void);
@@ -148,6 +158,7 @@ static void transfer_stream_open(stream_type_t stream, uint32_t start_sector);
 static void transfer_stream_data(uint32_t sector, const uint8_t *data, uint32_t size);
 static void transfer_update_state(error_t status);
 
+__WEAK void board_vfs_stream_closed_hook(void){}
 
 void vfs_mngr_fs_enable(bool enable)
 {
@@ -212,9 +223,8 @@ void vfs_mngr_periodic(uint32_t elapsed_ms)
         time_usb_idle += elapsed_ms;
     }
 
-    sync_unlock();
-
     if (!change_state) {
+        sync_unlock();
         return;
     }
 
@@ -310,7 +320,7 @@ void usbd_msc_read_sect(uint32_t sector, uint8_t *buf, uint32_t num_of_sectors)
     }
 
     // indicate msc activity
-    main_blink_msc_led(MAIN_LED_OFF);
+    main_blink_msc_led(MAIN_LED_FLASH);
     vfs_read(sector, buf, num_of_sectors);
 }
 
@@ -332,7 +342,7 @@ void usbd_msc_write_sect(uint32_t sector, uint8_t *buf, uint32_t num_of_sectors)
     }
 
     // indicate msc activity
-    main_blink_msc_led(MAIN_LED_OFF);
+    main_blink_msc_led(MAIN_LED_FLASH);
     vfs_write(sector, buf, num_of_sectors);
     if (TRASNFER_FINISHED == file_transfer_state.transfer_state) {
         return;
@@ -342,23 +352,23 @@ void usbd_msc_write_sect(uint32_t sector, uint8_t *buf, uint32_t num_of_sectors)
 
 static void sync_init(void)
 {
-    sync_thread = os_tsk_self();
-    os_mut_init(&sync_mutex);
+    sync_thread = osThreadGetId();
+    sync_mutex = osMutexNew(NULL);
 }
 
 static void sync_assert_usb_thread(void)
 {
-    util_assert(os_tsk_self() == sync_thread);
+    util_assert(osThreadGetId() == sync_thread);
 }
 
 static void sync_lock(void)
 {
-    os_mut_wait(&sync_mutex, 0xFFFF);
+    osMutexAcquire(sync_mutex, 0);
 }
 
 static void sync_unlock(void)
 {
-    os_mut_release(&sync_mutex);
+    osMutexRelease(sync_mutex);
 }
 
 static bool changing_state()
@@ -566,8 +576,8 @@ static void transfer_update_file_info(vfs_file_t file, uint32_t start_sector, ui
     }
 
     // Initialize the starting sector if it has not been set
-    if (VFS_INVALID_SECTOR == file_transfer_state.start_sector) {
-        file_transfer_state.start_sector = start_sector;
+    if (VFS_INVALID_SECTOR == file_transfer_state.file_start_sector) {
+        file_transfer_state.file_start_sector = start_sector;
 
         if (start_sector != VFS_INVALID_SECTOR) {
             vfs_mngr_printf("    start_sector=%i\r\n", start_sector);
@@ -584,22 +594,22 @@ static void transfer_update_file_info(vfs_file_t file, uint32_t start_sector, ui
     }
 
     // Check - File size must either grow or be smaller than the size already transferred
-    if ((size < file_transfer_state.file_size) && (size < file_transfer_state.size_transferred)) {
+    if ((size < file_transfer_state.file_size) && (size < file_transfer_state.size_transferred) && (size > 0)) {
         vfs_mngr_printf("    error: file size changed from %i to %i\r\n", file_transfer_state.file_size, size);
         transfer_update_state(ERROR_ERROR_DURING_TRANSFER);
         return;
     }
 
     // Check - Starting sector must be the same  - this is optional for file info since it may not be present initially
-    if ((VFS_INVALID_SECTOR != start_sector) && (start_sector != file_transfer_state.start_sector)) {
-        vfs_mngr_printf("    error: starting sector changed from %i to %i\r\n", file_transfer_state.start_sector, start_sector);
+    if ((VFS_INVALID_SECTOR != start_sector) && (start_sector != file_transfer_state.file_start_sector)) {
+        vfs_mngr_printf("    error: starting sector changed from %i to %i\r\n", file_transfer_state.file_start_sector, start_sector);
         transfer_update_state(ERROR_ERROR_DURING_TRANSFER);
         return;
     }
 
     // Check - stream must be the same
-    if (stream != file_transfer_state.stream) {
-        vfs_mngr_printf("    error: changed types during transfer from %i to %i\r\n", stream, file_transfer_state.stream);
+    if ((stream != STREAM_TYPE_NONE) && (stream != file_transfer_state.stream)) {
+        vfs_mngr_printf("    error: changed types during transfer from %i to %i\r\n", file_transfer_state.stream, stream);
         transfer_update_state(ERROR_ERROR_DURING_TRANSFER);
         return;
     }
@@ -615,12 +625,17 @@ static void transfer_update_file_info(vfs_file_t file, uint32_t start_sector, ui
 static void transfer_reset_file_info()
 {
     vfs_mngr_printf("vfs_manager transfer_reset_file_info()\r\n");
-    if (file_transfer_state.stream_open) {
-        transfer_update_state(ERROR_ERROR_DURING_TRANSFER);
-    } else {
-        file_transfer_state = default_transfer_state;
-        abort_remount();
+    //check if the data started streaming; size can be updated on matching start sector and stream type
+    if(file_transfer_state.stream_started){
+        //file, start sector and size has to be updated
+        file_transfer_state.file_to_program = VFS_FILE_INVALID;
+        file_transfer_state.file_start_sector = VFS_INVALID_SECTOR;
+        file_transfer_state.file_size = 0;
+    }else{
+          file_transfer_state = default_transfer_state;
+          abort_remount();
     }
+
 }
 
 // Update the tranfer state with new information
@@ -659,7 +674,7 @@ static void transfer_stream_open(stream_type_t stream, uint32_t start_sector)
 
     // Check - stream must be the same
     if (stream != file_transfer_state.stream) {
-        vfs_mngr_printf("    error: changed types during tranfer from %i to %i\r\n", stream, file_transfer_state.stream);
+        vfs_mngr_printf("    error: changed types during transfer from %i to %i\r\n", file_transfer_state.stream, stream);
         transfer_update_state(ERROR_ERROR_DURING_TRANSFER);
         return;
     }
@@ -703,6 +718,9 @@ static void transfer_stream_data(uint32_t sector, const uint8_t *data, uint32_t 
         file_transfer_state.stream_open = false;
         file_transfer_state.stream_finished = true;
         file_transfer_state.stream_optional_finish = true;
+
+        // Custom board hook to notify that a stream has close (flashing finished)
+        board_vfs_stream_closed_hook();
     } else if (ERROR_SUCCESS_DONE_OR_CONTINUE == status) {
         status = ERROR_SUCCESS;
         file_transfer_state.stream_optional_finish = true;
@@ -737,10 +755,12 @@ static void transfer_update_state(error_t status)
     // 1. A file has been detected
     // 2. The size of the file indicated in the root dir has been transferred
     // 3. The file size is greater than zero
+    // 4. Matching start sector set by stream and vfs changes
     file_transfer_state.file_info_optional_finish =
         (file_transfer_state.file_to_program != VFS_FILE_INVALID) &&
         (file_transfer_state.size_transferred >= file_transfer_state.file_size) &&
-        (file_transfer_state.file_size > 0);
+        (file_transfer_state.file_size > 0) &&
+        (file_transfer_state.start_sector == file_transfer_state.file_start_sector);
     transfer_timeout = file_transfer_state.transfer_timeout;
     transfer_started = (VFS_FILE_INVALID != file_transfer_state.file_to_program) ||
                        (STREAM_TYPE_NONE != file_transfer_state.stream);
@@ -791,9 +811,9 @@ static void transfer_update_state(error_t status)
 
     if (TRASNFER_FINISHED == file_transfer_state.transfer_state) {
         vfs_mngr_printf("vfs_manager transfer_update_state(status=%i)\r\n", status);
-        vfs_mngr_printf("    file=%p, start_sect= %i, size=%i\r\n",
+        vfs_mngr_printf("    file=%p, start_sect= %i %i, size=%i\r\n",
                         file_transfer_state.file_to_program, file_transfer_state.start_sector,
-                        file_transfer_state.file_size);
+                        file_transfer_state.file_start_sector, file_transfer_state.file_size);
         vfs_mngr_printf("    stream=%i, size_processed=%i, opt_finish=%i, timeout=%i\r\n",
                         file_transfer_state.stream, file_transfer_state.size_processed,
                         file_transfer_state.file_info_optional_finish, transfer_timeout);

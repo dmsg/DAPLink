@@ -3,7 +3,7 @@
  * @brief   board ID for the NXP FRDM-KL46Z board
  *
  * DAPLink Interface Firmware
- * Copyright (c) 2009-2016, ARM Limited, All Rights Reserved
+ * Copyright (c) 2009-2019, ARM Limited, All Rights Reserved
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -19,4 +19,17 @@
  * limitations under the License.
  */
 
-const char *board_id = "0220";
+#include "target_board.h"
+#include "target_family.h"
+
+const board_info_t g_board_info = {
+    .info_version = kBoardInfoVersion,
+    .board_id = "0220",
+    .family_id = kNXP_KinetisL_FamilyID,
+    .daplink_url_name =   "PRODINFOHTM",
+    .daplink_drive_name = "FRDM-KL46ZD",
+    .daplink_target_url = "http://www.nxp.com/frdm-kl46z",
+    .target_cfg = &target_device,
+    .board_vendor = "NXP",
+    .board_name = "FRDM-KL46Z",
+};

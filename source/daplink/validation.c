@@ -3,7 +3,7 @@
  * @brief   Implementation of validation.h
  *
  * DAPLink Interface Firmware
- * Copyright (c) 2009-2016, ARM Limited, All Rights Reserved
+ * Copyright (c) 2009-2019, ARM Limited, All Rights Reserved
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -19,47 +19,78 @@
  * limitations under the License.
  */
 
+#include <string.h>
 #include "validation.h"
-#include "string.h"
 #include "target_config.h"
+#include "target_family.h"
+#include "target_board.h"
 
 static inline uint32_t test_range(const uint32_t test, const uint32_t min, const uint32_t max)
 {
     return ((test < min) || (test > max)) ? 0 : 1;
 }
 
-__weak uint8_t validate_bin_nvic(const uint8_t *buf)
+uint8_t validate_bin_nvic(const uint8_t *buf)
 {
-    // test for known required NVIC entries
-    //  00 is stack pointer (RAM address)
-    //  04 is Reset vector  (FLASH address)
-    //  08 NMI_Handler      (FLASH address)
-    //  12 HardFault_Handler(FLASH address)
-    uint32_t i = 4, nvic_val = 0;
-    // test the initial SP value
-    memcpy(&nvic_val, buf + 0, sizeof(nvic_val));
-
-    if (0 == test_range(nvic_val, target_device.ram_start, target_device.ram_end)) {
-        return 0;
+    if (g_target_family && g_target_family->validate_bin_nvic) {
+        return g_target_family && g_target_family->validate_bin_nvic(buf);
+    } else {
+        return validate_bin_nvic_base(buf);
     }
-
-    // Reset_Handler
-    // NMI_Handler
-    // HardFault_Handler
-    for (; i <= 12; i += 4) {
-        memcpy(&nvic_val, buf + i, sizeof(nvic_val));
-
-        if (0 == test_range(nvic_val, target_device.flash_start, target_device.flash_end)) {
-            return 0;
-        }
-    }
-
-    return 1;
 }
 
-__weak uint8_t validate_hexfile(const uint8_t *buf)
+uint8_t validate_bin_nvic_base(const uint8_t *buf)
 {
-    // look here for known hex records
-    // add hex identifier b[0] == ':' && b[8] == {'0', '2', '3', '4', '5'}
-    return ((buf[0] == ':') && ((buf[8] == '0') || (buf[8] == '2') || (buf[8] == '3') || (buf[8] == '4') || (buf[8] == '5'))) ? 1 : 0;
+    if (g_board_info.target_cfg) {
+        uint32_t i = 4, nvic_val = 0;
+        uint8_t in_range = 0;
+        // test the initial SP value
+        memcpy(&nvic_val, buf + 0, sizeof(nvic_val));
+
+        region_info_t * region = g_board_info.target_cfg->ram_regions;
+        for (; region->start != 0 || region->end != 0; ++region) {
+            if (1 == test_range(nvic_val, region->start, region->end)) {
+                in_range = 1;
+                break;
+            }
+        }
+
+        if (in_range == 0) {
+            return 0;
+        }
+
+        // Reset_Handler
+        // NMI_Handler
+        // HardFault_Handler
+        for (; i <= 12; i += 4) {
+            in_range = 0;
+            memcpy(&nvic_val, buf + i, sizeof(nvic_val));
+            region_info_t * region = g_board_info.target_cfg->flash_regions;
+            for (; region->start != 0 || region->end != 0; ++region) {
+                if (1 == test_range(nvic_val, region->start, region->end)) {
+                    in_range = 1;
+                    break;
+                }
+            }
+            if (in_range == 0) {
+                return 0;
+            }
+        }
+
+        return 1;
+
+    } else {
+        return 0;
+    }
+}
+
+uint8_t validate_hexfile(const uint8_t *buf)
+{
+    if (g_target_family && g_target_family->validate_hexfile) {
+        return g_target_family->validate_hexfile(buf);
+    } else {
+        // look here for known hex records
+        // add hex identifier b[0] == ':' && b[8] == {'0', '2', '3', '4', '5'}
+        return ((buf[0] == ':') && ((buf[8] == '0') || (buf[8] == '2') || (buf[8] == '3') || (buf[8] == '4') || (buf[8] == '5'))) ? 1 : 0;
+    }
 }

@@ -21,13 +21,12 @@
 #ifndef _crc_h
 #define _crc_h
 
-#include "stdint.h"
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-uint16_t crc16(const void *data, int nBytes);
 uint32_t crc32(const void *data, int nBytes);
 uint32_t crc32_continue(uint32_t prev_crc, const void *data, int nBytes);
 

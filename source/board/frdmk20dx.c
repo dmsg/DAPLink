@@ -3,7 +3,7 @@
  * @brief   board ID for the NXP FRDM-K20DX board
  *
  * DAPLink Interface Firmware
- * Copyright (c) 2009-2016, ARM Limited, All Rights Reserved
+ * Copyright (c) 2009-2019, ARM Limited, All Rights Reserved
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -19,4 +19,17 @@
  * limitations under the License.
  */
 
-const char *board_id = "0230";
+#include "target_board.h"
+#include "target_family.h"
+
+const board_info_t g_board_info = {
+    .info_version = kBoardInfoVersion,
+    .board_id = "0230",
+    .family_id = kNXP_KinetisK_FamilyID,
+    .daplink_url_name =   "PRODINFOHTM",
+    .daplink_drive_name = "K20D50M",
+    .daplink_target_url = "http://www.nxp.com/frdm-k20d50m",
+    .target_cfg = &target_device,
+    .board_vendor = "NXP",
+    .board_name = "FRDM-K20D50M",
+};

@@ -3,7 +3,7 @@
  * @brief   board ID for the GR-PEACH
  *
  * DAPLink Interface Firmware
- * Copyright (c) 2009-2016, ARM Limited, All Rights Reserved
+ * Copyright (c) 2009-2019, ARM Limited, All Rights Reserved
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -18,15 +18,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "stdbool.h"
-#include "virtual_fs.h"
-#include "flash_manager.h"
 
-const char *board_id = "5500";
+#include "target_family.h"
+#include "target_board.h"
 
-const vfs_filename_t daplink_drive_name =     "MBED       ";
-
-void prerun_board_config(void)
-{
-    flash_manager_set_page_erase(true);
-}
+const board_info_t g_board_info = {
+    .info_version = kBoardInfoVersion,
+    .board_id = "5500",
+    .family_id = kRenesas_FamilyID,
+    .flags = kEnablePageErase,
+    .daplink_drive_name =       "MBED       ",
+    .target_cfg = &target_device,
+    .board_vendor = "Renesas",
+    .board_name = "GR-PEACH",
+};

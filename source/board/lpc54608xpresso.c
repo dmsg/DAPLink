@@ -3,7 +3,7 @@
  * @brief   board ID for the NXP LPC54608Xpresso board
  *
  * DAPLink Interface Firmware
- * Copyright (c) 2009-2017, ARM Limited, All Rights Reserved
+ * Copyright (c) 2009-2019, ARM Limited, All Rights Reserved
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -19,18 +19,17 @@
  * limitations under the License.
  */
 
-#include "virtual_fs.h"
+#include "target_family.h"
+#include "target_board.h"
 
-const char *board_id = "1056";
-
-// Override default behavior
-//
-// URL_NAME and DRIVE_NAME must be 11 characters excluding
-// the null terminated character
-// Note - 4 byte alignemnt required as workaround for ARMCC compiler bug with weak references
-__attribute__((aligned(4)))
-const vfs_filename_t daplink_url_name =       "PRODINFOHTM";
-__attribute__((aligned(4)))
-const vfs_filename_t daplink_drive_name =     "LPC54608";
-__attribute__((aligned(4)))
-const char *const daplink_target_url = "http://www.nxp.com/products/microcontrollers-and-processors/arm-processors/lpc-cortex-m-mcus/lpc54000-series-cortex-m4-mcus/lpcxpresso-development-board-for-lpc5460x-mcus:OM13092?fsrch=1&sr=2&pageNum=1";
+const board_info_t g_board_info = {
+    .info_version = kBoardInfoVersion,
+    .board_id = "1056",
+    .family_id = kStub_HWReset_FamilyID,
+    .daplink_url_name =       "PRODINFOHTM",
+    .daplink_drive_name =       "LPC546XX",
+    .daplink_target_url = "https://os.mbed.com/platforms/LPCXpresso54608/",
+    .target_cfg = &target_device,
+    .board_vendor = "NXP",
+    .board_name = "LPC54608Xpresso",
+};

@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 #
 # DAPLink Interface Firmware
 # Copyright (c) 2009-2016, ARM Limited, All Rights Reserved
@@ -18,6 +19,8 @@
 
 from __future__ import absolute_import
 
+from builtins import bytes
+
 import argparse
 
 
@@ -30,7 +33,7 @@ def create_padded_image(input_file, output_file, start,
     pad_size = start - pad_start
     with open(input_file, 'rb') as file_handle:
         data = file_handle.read()
-    output_data = data[0:copy_size] + '\xff' * (pad_size - copy_size) + data
+    output_data = data[0:copy_size] + bytes([0xff] * (pad_size - copy_size)) + data
     with open(output_file, 'wb') as file_handle:
         data = file_handle.write(output_data)
 

@@ -3,7 +3,7 @@
  * @brief   
  *
  * DAPLink Interface Firmware
- * Copyright (c) 2009-2016, ARM Limited, All Rights Reserved
+ * Copyright (c) 2009-2019, ARM Limited, All Rights Reserved
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -21,6 +21,8 @@
 
 //#include "flash_hal.h"        // FlashOS Structures       //TODO - uncomment
 #include "target_config.h"    // target_device
+#include "cortex_m.h"
+#include "target_board.h"
 
 #define KEY_VALUE             (0x5A)
 #define FCMD_WP               (0x1)           // "Write page" command
@@ -49,7 +51,7 @@ typedef struct {
     volatile uint32_t MC_FRR;
 } SFR_TABLE;
 
-__attribute__((section("ram_func")))
+RAM_FUNCTION
 static void _FeedWDT(void)
 {
     //
@@ -67,7 +69,7 @@ static void _FeedWDT(void)
 **********************************************************************
 */
 
-__attribute__((section("ram_func")))
+RAM_FUNCTION
 static void _WritePage(uint32_t Addr, volatile uint32_t *pSrc, int PerformErase)
 {
     SFR_TABLE *pSFRs;
@@ -118,7 +120,7 @@ static void _WritePage(uint32_t Addr, volatile uint32_t *pSrc, int PerformErase)
 *
 **********************************************************************
 */
-__attribute__((section("ram_func")))
+RAM_FUNCTION
 uint32_t Init(uint32_t adr, uint32_t clk, uint32_t fnc)
 {
     //
@@ -127,7 +129,7 @@ uint32_t Init(uint32_t adr, uint32_t clk, uint32_t fnc)
     return (0);
 }
 
-__attribute__((section("ram_func")))
+RAM_FUNCTION
 uint32_t UnInit(uint32_t fnc)
 {
     //
@@ -136,25 +138,31 @@ uint32_t UnInit(uint32_t fnc)
     return (0);
 }
 
-__attribute__((section("ram_func")))
+RAM_FUNCTION
 uint32_t EraseChip(void)
 {
-    uint32_t Addr;
-    //
-    // Return value 0 == O.K.
-    // Return value 1 == Error
-    // Erase complete chip by erasing sector-by-sector
-    Addr = target_device.flash_start;
+    if (g_board_info.target_cfg) {
+        uint32_t Addr;
+        //
+        // Return value 0 == O.K.
+        // Return value 1 == Error
+        // Erase complete chip by erasing sector-by-sector
+        Addr = g_board_info.target_cfg->flash_regions[0].start; //bootloader, interface flashing only concerns 1 flash region
 
-    do {
-        _WritePage(Addr, (volatile uint32_t *)0, 1);
-        Addr += (1 << 8);
-    } while (Addr < target_device.flash_end);
+        cortex_int_state_t state = cortex_int_get_and_disable();
+        do {
+            _WritePage(Addr, (volatile uint32_t *)0, 1);
+            Addr += (1 << 8);
+        } while (Addr < g_board_info.target_cfg->flash_regions[0].end);
+        cortex_int_restore(state);
 
-    return (0);  // O.K.
+        return (0);  // O.K.
+    }else {
+        return (1);  //No flash algo
+    }
 }
 
-__attribute__((section("ram_func")))
+RAM_FUNCTION
 uint32_t EraseSector(uint32_t adr)
 {
     uint32_t NumPagesLeft;
@@ -166,15 +174,17 @@ uint32_t EraseSector(uint32_t adr)
     //
     NumPagesLeft = 0x400 >> 8;                                         // SAM3U has 256 byte pages, DAPLink BTL/FW assumes 1 KB sectors
 
+    cortex_int_state_t state = cortex_int_get_and_disable();
     do {
         _WritePage(adr, (volatile uint32_t *)0, 1);
         adr += (1 << 8);
     } while (--NumPagesLeft);
+    cortex_int_restore(state);
 
     return (0);  // O.K.
 }
 
-__attribute__((section("ram_func")))
+RAM_FUNCTION
 uint32_t ProgramPage(uint32_t adr, uint32_t sz, uint32_t *buf)
 {
     uint32_t NumPagesLeft;
@@ -194,11 +204,13 @@ uint32_t ProgramPage(uint32_t adr, uint32_t sz, uint32_t *buf)
         return 1;
     }
 
+    cortex_int_state_t state = cortex_int_get_and_disable();
     do {
         _WritePage(adr, (volatile uint32_t *)temp_buf, 0);
         adr += (1 << 8);
         temp_buf += (1 << 8);
     } while (--NumPagesLeft);
+    cortex_int_restore(state);
 
     return (0);                                  // Finished without Errors
 }

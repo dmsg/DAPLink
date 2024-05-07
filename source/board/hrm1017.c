@@ -1,9 +1,9 @@
 /**
  * @file    hrm1017.c
- * @brief   board ID for the Switch Science HRM1017 board
+ * @brief   board ID for the Switch Science mbed HRM1017 board
  *
  * DAPLink Interface Firmware
- * Copyright (c) 2009-2016, ARM Limited, All Rights Reserved
+ * Copyright (c) 2009-2019, ARM Limited, All Rights Reserved
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -18,8 +18,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "virtual_fs.h"
+#include "target_board.h"
+#include "target_family.h"
 
-const char *board_id = "1017";
+extern target_cfg_t target_device_nrf51822_16;
 
-const vfs_filename_t daplink_drive_name =     "MBED       ";
+const board_info_t g_board_info = {
+    .info_version = kBoardInfoVersion,
+    .board_id = "1017",
+    .family_id = kNordic_Nrf51_FamilyID,
+    .daplink_drive_name = "MBED       ",
+    .target_cfg = &target_device_nrf51822_16,
+    .board_vendor = "Switch Science",
+    .board_name = "mbed HRM1017",
+};

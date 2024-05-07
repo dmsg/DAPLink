@@ -3,7 +3,9 @@
  * @brief   Implementation of settings.h
  *
  * DAPLink Interface Firmware
- * Copyright (c) 2009-2016, ARM Limited, All Rights Reserved
+ * Copyright (c) 2009-2020, ARM Limited, All Rights Reserved
+ * Copyright 2019, Cypress Semiconductor Corporation 
+ * or a subsidiary of Cypress Semiconductor Corporation.
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -19,7 +21,7 @@
  * limitations under the License.
  */
 
-#include "string.h"
+#include <string.h>
 
 #include "settings.h"
 #include "target_config.h"
@@ -30,6 +32,9 @@
 // 'kvld' in hex - key valid
 #define CFG_KEY             0x6b766c64
 #define SECTOR_BUFFER_SIZE  16
+
+// For generating hexdumps on faults
+#define ALLOWED_HEXDUMP     16
 
 // WARNING - THIS STRUCTURE RESIDES IN RAM STORAGE!
 // Be careful with changes:
@@ -46,12 +51,27 @@ typedef struct __attribute__((__packed__)) cfg_ram {
     uint16_t assert_line;
     uint8_t assert_source;
 
-    // Add new members here
+    // Additional debug information on faults
+    uint8_t  valid_dumps;
+    uint32_t hexdump[ALLOWED_HEXDUMP];  //Alignments checked
 
+    // Disable msd support
+    uint8_t disable_msd;
+
+    //Add new entries from here
+    uint8_t page_erase_enable;
 } cfg_ram_t;
 
+// Ensure hexdump field is word aligned.
+COMPILER_ASSERT((offsetof(cfg_ram_t, hexdump) % sizeof(uint32_t)) == 0);
+
 // Configuration RAM
+#if defined(__CC_ARM)
 static cfg_ram_t config_ram __attribute__((section("cfgram"), zero_init));
+#else
+static cfg_ram_t config_ram __attribute__((section("cfgram")));
+#endif
+
 // Ram copy of RAM config
 static cfg_ram_t config_ram_copy;
 
@@ -80,6 +100,10 @@ void config_init()
            sizeof(config_ram_copy.assert_file_name));
     config_ram.assert_line =  config_ram_copy.assert_line;
     config_ram.assert_source =  config_ram_copy.assert_source;
+    config_ram.valid_dumps = config_ram_copy.valid_dumps;
+    memcpy(config_ram.hexdump, config_ram_copy.hexdump, sizeof(config_ram_copy.hexdump[0]) * config_ram_copy.valid_dumps);
+    config_ram.disable_msd = config_ram_copy.disable_msd;
+    config_ram.page_erase_enable = config_ram_copy.page_erase_enable;
     config_rom_init();
 }
 
@@ -123,6 +147,7 @@ void config_ram_clear_assert()
 {
     memset(config_ram.assert_file_name, 0, sizeof(config_ram.assert_file_name));
     config_ram.assert_line = 0;
+    config_ram.valid_dumps = 0;
 }
 
 bool config_ram_get_hold_in_bl()
@@ -182,4 +207,49 @@ bool config_ram_get_assert(char *buf, uint16_t buf_size, uint16_t *line, assert_
     }
 
     return true;
+}
+
+uint8_t config_ram_add_hexdump(uint32_t hexdump)
+{
+    if (config_ram.valid_dumps >= ALLOWED_HEXDUMP) {
+        return 0;
+    }
+
+    //alignment is maintained here
+    config_ram.hexdump[config_ram.valid_dumps++] = hexdump;
+    return config_ram.valid_dumps;
+}
+
+uint8_t config_ram_get_hexdumps(uint32_t **hexdumps)
+{
+    if (config_ram.valid_dumps == 0) {
+        return 0;
+    }
+
+    // this hack prevents a gcc compiler warning about possible unaligned word pointer.
+    // we know in advance that the pointer to the hexdump field is word aligned due to the
+    // compiler assert at the top of this file.
+    uint32_t hd_addr = (uint32_t)&config_ram.hexdump;
+    *hexdumps = (uint32_t *)hd_addr;
+    return config_ram.valid_dumps;
+}
+
+void config_ram_set_disable_msd(bool disable_msd)
+{
+    config_ram.disable_msd = disable_msd;
+}
+
+uint8_t config_ram_get_disable_msd(void)
+{
+    return config_ram.disable_msd;
+}
+
+void config_ram_set_page_erase(bool page_erase_enable)
+{
+    config_ram.page_erase_enable = page_erase_enable;
+}
+
+bool config_ram_get_page_erase(void)
+{
+    return config_ram.page_erase_enable;
 }

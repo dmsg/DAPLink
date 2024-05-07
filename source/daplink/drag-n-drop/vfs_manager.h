@@ -22,8 +22,8 @@
 #ifndef VFS_MANAGER_USER_H
 #define VFS_MANAGER_USER_H
 
-#include "stdint.h"
-#include "stdbool.h"
+#include <stdint.h>
+#include <stdbool.h>
 
 #include "virtual_fs.h"
 #include "error.h"
@@ -32,11 +32,8 @@
 extern "C" {
 #endif
 
-extern const vfs_filename_t daplink_mode_file_name;
-extern const vfs_filename_t daplink_drive_name;
-extern const vfs_filename_t daplink_url_name;
-extern const char *const daplink_target_url;
 
+extern const vfs_filename_t daplink_mode_file_name;
 
 /* Callable from anywhere */
 

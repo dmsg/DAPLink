@@ -35,7 +35,7 @@ extern uint32_t SystemCoreClock;
 
 #define RX_OVRF_MSG         "<DAPLink:Overflow>\n"
 #define RX_OVRF_MSG_SIZE    (sizeof(RX_OVRF_MSG) - 1)
-#define  BUFFER_SIZE    (64)
+#define  BUFFER_SIZE    (512)
 
 circ_buf_t write_buffer;
 uint8_t write_buffer_data[BUFFER_SIZE];
@@ -46,7 +46,7 @@ static int32_t reset(void);
 
 #define UART_IRQn  USART0_IRQn
 #define LPC_USART  LPC_USART0
-#define UART_IRQHandler  UART0_IRQHandler
+#define UART_IRQHandler  USART0_IRQHandler
 
 // UART Control Pin           P2_2:  GPIO5[2]
 #define PORT_UARTCTRL         5
@@ -255,6 +255,10 @@ int32_t uart_get_configuration(UART_Configuration *config)
     // get flow control
     config->FlowControl = UART_FLOW_CONTROL_NONE;
     return 1;
+}
+
+void uart_set_control_line_state(uint16_t ctrl_bmp)
+{
 }
 
 int32_t uart_write_free(void)

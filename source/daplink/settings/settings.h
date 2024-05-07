@@ -4,6 +4,8 @@
  *
  * DAPLink Interface Firmware
  * Copyright (c) 2009-2016, ARM Limited, All Rights Reserved
+ * Copyright 2019, Cypress Semiconductor Corporation 
+ * or a subsidiary of Cypress Semiconductor Corporation.
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -21,8 +23,8 @@
 #ifndef SETTINGS_H
 #define SETTINGS_H
 
-#include "stdint.h"
-#include "stdbool.h"
+#include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,9 +42,11 @@ void config_init(void);
 void config_set_auto_rst(bool on);
 void config_set_automation_allowed(bool on);
 void config_set_overflow_detect(bool on);
+void config_set_detect_incompatible_target(bool on);
 bool config_get_auto_rst(void);
 bool config_get_automation_allowed(void);
 bool config_get_overflow_detect(void);
+bool config_get_detect_incompatible_target(void);
 
 // Get/set settings residing in shared ram
 void config_ram_set_hold_in_bl(bool hold);
@@ -51,6 +55,12 @@ void config_ram_clear_assert(void);
 bool config_ram_get_hold_in_bl(void);
 bool config_ram_get_initial_hold_in_bl(void);
 bool config_ram_get_assert(char *buf, uint16_t buf_size, uint16_t *line, assert_source_t *source);
+uint8_t config_ram_add_hexdump(uint32_t hexdump);
+uint8_t config_ram_get_hexdumps(uint32_t **hexdumps);
+void config_ram_set_disable_msd(bool disable_msd);
+uint8_t config_ram_get_disable_msd(void);
+void config_ram_set_page_erase(bool page_erase_enable);
+bool config_ram_get_page_erase(void);
 
 // Private - should only be called from settings.c
 void config_rom_init(void);

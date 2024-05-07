@@ -19,9 +19,8 @@
  * limitations under the License.
  */
 
-#include "RTL.h"
+#include <string.h>
 #include "rl_usb.h"
-#include "string.h"
 #include "usb_for_lib.h"
 #include "info.h"
 
@@ -45,12 +44,6 @@ OS_TID USBD_RTX_CoreTask;           /* USB Core Task ID */
 #endif
 
 
-__asm void $$USBD$$version(void)
-{
-    /* Export a version number symbol for a version control. */
-    EXPORT  __RL_USBD_VER
-__RL_USBD_VER   EQU     0x470
-}
 
 
 /*
@@ -209,7 +202,7 @@ static inline BOOL USBD_ReqGetStatus(void)
 
         case REQUEST_TO_INTERFACE:
             if ((USBD_Configuration != 0) && (USBD_SetupPacket.wIndexL < USBD_NumInterfaces)) {
-                *((__packed U16 *)USBD_EP0Buf) = 0;
+                __UNALIGNED_UINT16_WRITE(USBD_EP0Buf, 0);
                 USBD_EP0Data.pData = USBD_EP0Buf;
             } else {
                 return (__FALSE);
@@ -222,7 +215,7 @@ static inline BOOL USBD_ReqGetStatus(void)
             m = (n & 0x80) ? ((1 << 16) << (n & 0x0F)) : (1 << n);
 
             if (((USBD_Configuration != 0) || ((n & 0x0F) == 0)) && (USBD_EndPointMask & m)) {
-                *((__packed U16 *)USBD_EP0Buf) = (USBD_EndPointHalt & m) ? 1 : 0;
+                __UNALIGNED_UINT16_WRITE(USBD_EP0Buf, (USBD_EndPointHalt & m) ? 1 : 0);
                 USBD_EP0Data.pData = USBD_EP0Buf;
             } else {
                 return (__FALSE);
@@ -363,8 +356,10 @@ static inline BOOL USBD_ReqGetDescriptor(void)
 
                     if (USBD_HighSpeed == __FALSE) {
                         pD = (U8 *)USBD_ConfigDescriptor;
+                        ((USB_CONFIGURATION_DESCRIPTOR *)pD)->bDescriptorType = USB_CONFIGURATION_DESCRIPTOR_TYPE; //same descriptor is used in other configuration
                     } else {
                         pD = (U8 *)USBD_ConfigDescriptor_HS;
+                        ((USB_CONFIGURATION_DESCRIPTOR *)pD)->bDescriptorType = USB_CONFIGURATION_DESCRIPTOR_TYPE; //same descriptor is used in other configuration
                     }
 
                     for (n = 0; n != USBD_SetupPacket.wValueL; n++) {
@@ -387,9 +382,11 @@ static inline BOOL USBD_ReqGetDescriptor(void)
                     }
 
                     if (USBD_HighSpeed == __FALSE) {
-                        pD = (U8 *)USBD_OtherSpeedConfigDescriptor;
+                        pD = (U8 *)USBD_ConfigDescriptor_HS;
+                        ((USB_CONFIGURATION_DESCRIPTOR *)pD)->bDescriptorType = USB_OTHER_SPEED_CONFIG_DESCRIPTOR_TYPE; //same descriptor is used in main configuration
                     } else {
-                        pD = (U8 *)USBD_OtherSpeedConfigDescriptor_HS;
+                        pD = (U8 *)USBD_ConfigDescriptor;
+                        ((USB_CONFIGURATION_DESCRIPTOR *)pD)->bDescriptorType = USB_OTHER_SPEED_CONFIG_DESCRIPTOR_TYPE; //same descriptor is used in main configuration
                     }
 
                     for (n = 0; n != USBD_SetupPacket.wValueL; n++) {
@@ -428,6 +425,21 @@ static inline BOOL USBD_ReqGetDescriptor(void)
 
                     USBD_EP0Data.pData = pD;
                     len = ((USB_STRING_DESCRIPTOR *)pD)->bLength;
+                    break;
+
+                case USB_BINARY_OBJECT_STORE_DESCRIPTOR_TYPE:
+                    if (!usbd_bos_enable) {
+                        return (__FALSE);  /* High speed not enabled */
+                    }
+
+                    pD = (U8 *)USBD_BinaryObjectStoreDescriptor;
+                    USBD_EP0Data.pData = pD;
+
+                    if (((USB_BINARY_OBJECT_STORE_DESCRIPTOR *)pD)->bLength == 0) {
+                        return (__FALSE);
+                    }
+
+                    len = ((USB_BINARY_OBJECT_STORE_DESCRIPTOR *)pD)->wTotalLength;
                     break;
 
                 default:
@@ -508,6 +520,7 @@ static inline BOOL USBD_ReqSetConfiguration(void)
                 while (pD->bLength) {
                     switch (pD->bDescriptorType) {
                         case USB_CONFIGURATION_DESCRIPTOR_TYPE:
+                        case USB_OTHER_SPEED_CONFIG_DESCRIPTOR_TYPE:
                             if (((USB_CONFIGURATION_DESCRIPTOR *)pD)->bConfigurationValue == USBD_SetupPacket.wValueL) {
                                 USBD_Configuration = USBD_SetupPacket.wValueL;
                                 USBD_NumInterfaces = ((USB_CONFIGURATION_DESCRIPTOR *)pD)->bNumInterfaces;
@@ -655,6 +668,7 @@ static inline BOOL USBD_ReqSetInterface(void)
             while (pD->bLength) {
                 switch (pD->bDescriptorType) {
                     case USB_CONFIGURATION_DESCRIPTOR_TYPE:
+                    case USB_OTHER_SPEED_CONFIG_DESCRIPTOR_TYPE:
                         if (((USB_CONFIGURATION_DESCRIPTOR *)pD)->bConfigurationValue != USBD_Configuration) {
                             pD = (USB_COMMON_DESCRIPTOR *)((U8 *)pD + ((USB_CONFIGURATION_DESCRIPTOR *)pD)->wTotalLength);
                             continue;
@@ -910,6 +924,25 @@ void USBD_EndPoint0(U32 event)
 setup_class_ok:                                                          /* request finished successfully */
                 break;  /* end case REQUEST_CLASS */
 
+            case REQUEST_VENDOR:
+                switch (USBD_SetupPacket.bmRequestType.Recipient) {
+                    case REQUEST_TO_DEVICE:
+                        if (USBD_EndPoint0_Setup_WebUSB_ReqToDevice()) {
+                            goto setup_vendor_ok;
+                        }
+
+                        if (USBD_EndPoint0_Setup_WinUSB_ReqToDevice()) {
+                            goto setup_vendor_ok;
+                        }
+
+                        goto stall;
+
+                    default:
+                        goto stall;
+                }
+setup_vendor_ok:
+                break; /* end case REQUEST_VENDOR */
+
             default:
 stall:
                 if ((USBD_SetupPacket.bmRequestType.Dir == REQUEST_HOST_TO_DEVICE) &&
@@ -1007,7 +1040,7 @@ stall_i:
  */
 
 #ifdef __RTX
-__task void USBD_RTX_EndPoint0(void)
+void USBD_RTX_EndPoint0(void)
 {
     for (;;) {
         usbd_os_evt_wait_or(0xFFFF, 0xFFFF);

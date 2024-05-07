@@ -26,7 +26,7 @@
 extern "C"  {
 #endif
 
-#include "stdint.h"
+#include <stdint.h>
 #include "usb.h"
 
 /*****************  Functions *************************************************/
@@ -89,6 +89,8 @@ extern void  usbd_cls_sof(void);
 extern BOOL  usbd_cls_dev_req(BOOL setup);
 extern BOOL  usbd_cls_if_req(BOOL setup);
 extern BOOL  usbd_cls_ep_req(BOOL setup);
+
+extern void  usbd_bulk_init(void);
 
 #ifdef __cplusplus
 }

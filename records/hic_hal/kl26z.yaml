@@ -1,6 +1,8 @@
 common:
     target:
         - mkl26z128xxx4
+    core:
+        - Cortex-M0+
     macros:
         - INTERFACE_KL26Z
         - CPU_MKL26Z128VLH4
@@ -8,16 +10,15 @@ common:
         - FLASH_SSD_CONFIG_ENABLE_FLEXNVM_SUPPORT=0
         - FLASH_DRIVER_IS_FLASH_RESIDENT=1
         - DAPLINK_NO_ASSERT_FILENAMES
+        - OS_CLOCK=48000000
     includes:
         - source/hic_hal/freescale/kl26z
         - source/hic_hal/freescale/kl26z/MKL26Z4
-        - projectfiles/uvision/kl26z_bl/build
     sources:
         hic_hal:
             - source/hic_hal/freescale
             - source/hic_hal/freescale/kl26z
             - source/hic_hal/freescale/kl26z/MKL26Z4
-            - source/hic_hal/freescale/kl26z/armcc
         fsl_flash_driver:
             - source/hic_hal/freescale/iap
 
@@ -26,3 +27,22 @@ tool_specific:
         misc:
             ld_flags:
                 - --predefine="-I..\..\..\source\hic_hal\freescale\kl26z"
+        includes:
+            - projectfiles/uvision/kl26z_bl/build
+        sources:
+            hic_hal:
+                - source/hic_hal/freescale/kl26z/armcc
+    armcc:
+        sources:
+            hic_hal:
+                - source/hic_hal/freescale/kl26z/armcc
+    armclang:
+        sources:
+            hic_hal:
+                - source/hic_hal/freescale/kl26z/armcc
+    gcc_arm:
+        linker_file:
+            - source/hic_hal/freescale/kinetis.ld
+        sources:
+            hic_hal:
+                - source/hic_hal/freescale/kl26z/gcc
